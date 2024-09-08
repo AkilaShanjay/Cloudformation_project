@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: This is a Banking app to check the balance status using S3, Lambda, and API Gateway
+
+Resources:
+  bankingS3bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: balancestatus2429
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Description: IAM role for Lambda to access S3
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      RoleName: LambdaExecutionRole
+
+  LambdaFunction:
+    DependsOn: LambdaExecutionRole
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Handler: index.lambda_handler
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          client = boto3.client('s3')
+
+          def lambda_handler(event, context):
+              response = client.get_object(
+                  Bucket='balancestatus2429',
+                  Key='accountBalance.json',
+              )
+
+              # convert from streaming data to byte
+              data_byte = response['Body'].read()
+              # convert from byte to string
+              data_string = data_byte.decode("UTF-8")
+              # convert from JSON string to dictionary
+              data_dict = json.loads(data_string)
+
+              return {
+                  'StatusCode': 200,
+                  'body': json.dumps(data_dict),
+                  'headers': { 'Content-Type': 'application/json' },
+              }
+      Description: Invoke a function during stack creation
+      Timeout: 60
+
+  bankingRESTAPI:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: balancestatusapi
+
+  bankingstatusresource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt bankingRESTAPI.RootResourceId
+      PathPart: balanceStatus01
+      RestApiId: !Ref bankingRESTAPI
+
+  bankingstatusmethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref bankingRESTAPI
+      ResourceId: !Ref bankingstatusresource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+       Type: AWS
+       IntegrationHttpMethod: POST
+       Uri: !Sub 'arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations'
+       IntegrationResponses:
+        - StatusCode: 200
+
+  APIDeployment:
+      DependsOn: bankingstatusmethod
+      Type: 'AWS::ApiGateway::Deployment'
+      Properties:
+        RestApiId: !Ref bankingRESTAPI
+        Description: My deployment to prod
+        StageName: prod
+  LambdaInvokePermission: 
+     Type: AWS::Lambda::Permission
+     Properties:
+       FunctionName: !Ref LambdaFunction
+       Action: lambda:InvokeFunction
+       Principal: apigateway.amazonaws.com
+       SourceAccount: 454108909213
+    
+  
+
+
+
